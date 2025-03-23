@@ -40,21 +40,36 @@ class AppState: ObservableObject {
     @Published var hasActiveSubscription = false
     @Published var hasCompletedOnboarding = false
     
-    // OpenAI configuration - Replace with actual key in production
-    private let openAIKey = "OPENAI_API_KEY" // Replace with your key when running
+    // API keys from ConfigurationManager
+    private let openAIKey: String
+    private let supabaseURL: URL
+    private let supabaseKey: String
     
     init() {
+        // Get configuration values
+        let configManager = ConfigurationManager.shared
+        openAIKey = configManager.value(forKey: .openAIAPIKey) ?? ""
+        supabaseKey = configManager.value(forKey: .supabaseKey) ?? ""
+        let supabaseURLString = configManager.value(forKey: .supabaseURL) ?? ""
+        supabaseURL = URL(string: supabaseURLString)!
+        
         // Initialize Supabase client
-        // Note: In a production app, these would be stored securely
         self.supabase = SupabaseClient(
-            supabaseURL: URL(string: "https://pcchrtwfjgfoequvbufq.supabase.co")!,
-            supabaseKey: "SUPABASE_API_KEY" // Replace with your key when running
+            supabaseURL: supabaseURL,
+            supabaseKey: supabaseKey
         )
         
         // Check for existing session
         Task {
             await checkSession()
         }
+        
+        // For development, enable these to bypass authentication and subscription
+        #if DEBUG
+        // isAuthenticated = true
+        // hasCompletedOnboarding = true
+        // hasActiveSubscription = true
+        #endif
     }
     
     func checkSession() async {
