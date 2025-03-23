@@ -338,6 +338,8 @@ struct MainView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var viewModel: ContactsViewModel
     @State private var inputText = ""
+    @State private var selectedContact: Contact? = nil
+    @State private var showingContactDetail = false
     
     var body: some View {
         NavigationView {
@@ -423,16 +425,19 @@ struct MainView: View {
                 // Results list
                 List {
                     ForEach(viewModel.filteredContacts) { contact in
-                        ContactRow(contact: contact)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await viewModel.deleteContact(contactId: contact.id)
-                                    }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+                        NavigationLink(destination: ContactDetailView(contact: contact)
+                            .environmentObject(viewModel)) {
+                            ContactRow(contact: contact)
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                Task {
+                                    await viewModel.deleteContact(contactId: contact.id)
                                 }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
                             }
+                        }
                     }
                 }
                 .listStyle(PlainListStyle())
