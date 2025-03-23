@@ -172,6 +172,188 @@ class ContactsViewModel: ObservableObject {
         }
     }
     
+    // MARK: - Contact Management
+    
+    func updateContactDescription(contact: Contact, newDescription: String) async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            // Update the contact object
+            var updatedContact = contact
+            updatedContact.textDescription = newDescription
+            updatedContact.updatedAt = Date()
+            
+            // Save to database
+            let savedContact = try await databaseService.updateContact(contact: updatedContact)
+            
+            // Update in our local array
+            await MainActor.run {
+                if let index = self.contacts.firstIndex(where: { $0.id == contact.id }) {
+                    self.contacts[index].textDescription = newDescription
+                    self.contacts[index].updatedAt = savedContact.updatedAt
+                }
+                
+                if let index = self.filteredContacts.firstIndex(where: { $0.id == contact.id }) {
+                    self.filteredContacts[index].textDescription = newDescription
+                    self.filteredContacts[index].updatedAt = savedContact.updatedAt
+                }
+                
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                self.errorMessage = "Failed to update contact: \(error.localizedDescription)"
+                self.isLoading = false
+            }
+        }
+    }
+    
+    func deleteContact(contactId: UUID) async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            try await databaseService.deleteContact(contactId: contactId)
+            
+            await MainActor.run {
+                contacts.removeAll { $0.id == contactId }
+                filteredContacts.removeAll { $0.id == contactId }
+                isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to delete contact: \(error.localizedDescription)"
+                isLoading = false
+            }
+        }
+    }
+    
+    // MARK: - Label Management
+    
+    func assignLabel(to contact: Contact, labelId: UUID) async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            // Check if the label is already assigned
+            if contact.labels?.contains(where: { $0.id == labelId }) ?? false {
+                await MainActor.run {
+                    isLoading = false
+                }
+                return
+            }
+            
+            // Assign the label in the database
+            _ = try await databaseService.assignLabelToContact(contactId: contact.id, labelId: labelId)
+            
+            // Get the label
+            if let label = labels.first(where: { $0.id == labelId }) {
+                // Update our local array
+                await MainActor.run {
+                    if let index = self.contacts.firstIndex(where: { $0.id == contact.id }) {
+                        if self.contacts[index].labels == nil {
+                            self.contacts[index].labels = []
+                        }
+                        self.contacts[index].labels?.append(label)
+                    }
+                    
+                    if let index = self.filteredContacts.firstIndex(where: { $0.id == contact.id }) {
+                        if self.filteredContacts[index].labels == nil {
+                            self.filteredContacts[index].labels = []
+                        }
+                        self.filteredContacts[index].labels?.append(label)
+                    }
+                    
+                    self.isLoading = false
+                }
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to assign label: \(error.localizedDescription)"
+                isLoading = false
+            }
+        }
+    }
+    
+    func removeLabel(from contact: Contact, labelId: UUID) async {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            // Remove the label in the database
+            try await databaseService.removeLabelFromContact(contactId: contact.id, labelId: labelId)
+            
+            // Update our local array
+            await MainActor.run {
+                if let index = self.contacts.firstIndex(where: { $0.id == contact.id }) {
+                    self.contacts[index].labels?.removeAll { $0.id == labelId }
+                }
+                
+                if let index = self.filteredContacts.firstIndex(where: { $0.id == contact.id }) {
+                    self.filteredContacts[index].labels?.removeAll { $0.id == labelId }
+                }
+                
+                self.isLoading = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to remove label: \(error.localizedDescription)"
+                isLoading = false
+            }
+        }
+    }
+    
+    func createLabel(name: String) async -> Label? {
+        await MainActor.run {
+            isLoading = true
+            errorMessage = nil
+        }
+        
+        do {
+            // Check if the label already exists
+            if labels.contains(where: { $0.name.lowercased() == name.lowercased() }) {
+                await MainActor.run {
+                    errorMessage = "Label '\(name)' already exists"
+                    isLoading = false
+                }
+                return nil
+            }
+            
+            // Create the label
+            let newLabel = Label(
+                id: UUID(),
+                userId: userId,
+                name: name,
+                createdAt: Date()
+            )
+            
+            let createdLabel = try await databaseService.createLabel(label: newLabel)
+            
+            // Add to local labels array
+            await MainActor.run {
+                self.labels.append(createdLabel)
+                self.isLoading = false
+            }
+            
+            return createdLabel
+        } catch {
+            await MainActor.run {
+                errorMessage = "Failed to create label: \(error.localizedDescription)"
+                isLoading = false
+            }
+            return nil
+        }
+    }
+    
     // MARK: - Search
     
     private func searchContacts(query: String) async {
@@ -229,28 +411,8 @@ class ContactsViewModel: ObservableObject {
             switch commandResponse.commandType {
             case .createLabel:
                 if let labelName = commandResponse.labelName, !labelName.isEmpty {
-                    // Check if label already exists
-                    if labels.contains(where: { $0.name.lowercased() == labelName.lowercased() }) {
-                        await MainActor.run {
-                            errorMessage = "Label '\(labelName)' already exists"
-                            isLoading = false
-                        }
-                    } else {
-                        // Create new label
-                        let newLabel = Label(
-                            id: UUID(),
-                            userId: userId,
-                            name: labelName,
-                            createdAt: Date()
-                        )
-                        
-                        let createdLabel = try await databaseService.createLabel(label: newLabel)
-                        
-                        await MainActor.run {
-                            self.labels.append(createdLabel)
-                            self.isLoading = false
-                        }
-                    }
+                    // Create new label
+                    _ = await createLabel(name: labelName)
                 } else {
                     await MainActor.run {
                         errorMessage = "Could not determine label name from your input"
@@ -298,30 +460,6 @@ class ContactsViewModel: ObservableObject {
         } catch {
             await MainActor.run {
                 errorMessage = "Failed to process command: \(error.localizedDescription)"
-                isLoading = false
-            }
-        }
-    }
-    
-    // MARK: - Contact Management
-    
-    func deleteContact(contactId: UUID) async {
-        await MainActor.run {
-            isLoading = true
-            errorMessage = nil
-        }
-        
-        do {
-            try await databaseService.deleteContact(contactId: contactId)
-            
-            await MainActor.run {
-                contacts.removeAll { $0.id == contactId }
-                filteredContacts = contacts
-                isLoading = false
-            }
-        } catch {
-            await MainActor.run {
-                errorMessage = "Failed to delete contact: \(error.localizedDescription)"
                 isLoading = false
             }
         }
