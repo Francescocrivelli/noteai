@@ -85,6 +85,15 @@ class DatabaseService {
             .value
     }
     
+    func getContact(contactId: UUID) async throws -> Contact? {
+        return try await supabase.from("contacts")
+            .select()
+            .eq("id", value: contactId.uuidString)
+            .single()
+            .execute()
+            .value
+    }
+    
     func createContact(contact: Contact) async throws -> Contact {
         return try await supabase.from("contacts")
             .insert(contact)
@@ -116,6 +125,15 @@ class DatabaseService {
             .select()
             .eq("user_id", value: userId.uuidString)
             .order("name", ascending: true)
+            .execute()
+            .value
+    }
+    
+    func getLabel(labelId: UUID) async throws -> Label? {
+        return try await supabase.from("labels")
+            .select()
+            .eq("id", value: labelId.uuidString)
+            .single()
             .execute()
             .value
     }
@@ -169,6 +187,21 @@ class DatabaseService {
         return labels
     }
     
+    func getContactsForLabel(labelId: UUID) async throws -> [Contact] {
+        let query = """
+        contact_labels!inner(contact_id, label_id),
+        id, user_id, name, phone_number, email, text_description, created_at, updated_at
+        """
+        
+        let contacts: [Contact] = try await supabase.from("contacts")
+            .select(query)
+            .eq("contact_labels.label_id", value: labelId.uuidString)
+            .execute()
+            .value
+        
+        return contacts
+    }
+    
     func assignLabelToContact(contactId: UUID, labelId: UUID) async throws -> ContactLabel {
         let contactLabel = ContactLabel(
             id: UUID(),
@@ -191,4 +224,40 @@ class DatabaseService {
             .eq("label_id", value: labelId.uuidString)
             .execute()
     }
+    
+    // MARK: - Search and Utilities
+    
+    func searchContacts(userId: UUID, query: String) async throws -> [Contact] {
+        return try await supabase.from("contacts")
+            .select()
+            .eq("user_id", value: userId.uuidString)
+            .or("name.ilike.%\(query)%,text_description.ilike.%\(query)%")
+            .execute()
+            .value
+    }
+    
+    func getContactCount(userId: UUID) async throws -> Int {
+        let result: [PostgRESTCountResult] = try await supabase.from("contacts")
+            .select("*", head: true, count: .exact)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+            .value
+        
+        return result.first?.count ?? 0
+    }
+    
+    func getLabelCount(userId: UUID) async throws -> Int {
+        let result: [PostgRESTCountResult] = try await supabase.from("labels")
+            .select("*", head: true, count: .exact)
+            .eq("user_id", value: userId.uuidString)
+            .execute()
+            .value
+        
+        return result.first?.count ?? 0
+    }
+}
+
+// Helper structure for count results
+struct PostgRESTCountResult: Decodable {
+    let count: Int
 }
